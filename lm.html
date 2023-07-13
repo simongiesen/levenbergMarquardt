@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Levenberg-Marquardt mit math.js</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.1.0/math.min.js"></script>
+</head>
+<body>
+
+  <script>
+   
+		/*
+		Der y-Achsenabschnitt (a) gibt den y-Wert an, den die Kurve erreicht, wenn x gegen Unendlich geht. Er repräsentiert den Startwert oder den Grundwert der exponentiellen Funktion.
+		*/
+		
+		/*
+		Die Steigung (b) bestimmt, wie schnell die Kurve steigt oder fällt. Ein größerer Wert für b führt zu einer steileren Kurve, während ein kleinerer Wert zu einer flacheren Kurve führt.
+		*/
+		
+		
+		var xValues = [1, 2, 3, 4, 5];
+		var yValues = [2.7, 7.4, 18.2, 43.2, 97.4];
+ 
+		var initialParamsA = estimateInitialParameters(xValues, yValues);
+		console.log('Initial Parameters: ' + initialParamsA);
+  
+		function levenbergMarquardt(xValues, yValues, initialParams, modelFunction, options) {
+		  var math = window.math;  
+
+		  // Funktion zur Berechnung der Residuen (Differenz zwischen berechneten y-Werten und tatsächlichen y-Werten)
+		  function computeResiduals(params) {
+			var residuals = [];
+			for (var i = 0; i < xValues.length; i++) {
+			  var predictedY = modelFunction(xValues[i], params);
+			  var residual = predictedY - yValues[i];
+			  residuals.push(residual);
+			}
+			return residuals;
+		  }
+
+		  // Jacobimatrix-Funktion (Ableitungen nach den Parametern)
+		  function jacobian(params) {
+			var matrix = math.zeros(xValues.length, initialParams.length);
+			for (var i = 0; i < xValues.length; i++) {
+			  var row = [];
+			  for (var j = 0; j < initialParams.length; j++) {
+				var h = options.damping * (Math.abs(params[j]) + 1e-4);
+				var paramPlusH = params[j] + h;
+				var paramMinusH = params[j] - h;
+				var fPlusH = modelFunction(xValues[i], params.map(function (val, idx) { return idx === j ? paramPlusH : val; }));
+				var fMinusH = modelFunction(xValues[i], params.map(function (val, idx) { return idx === j ? paramMinusH : val; }));
+
+				// Überprüfung auf NaN
+				if (isNaN(fPlusH) || isNaN(fMinusH)) {
+				  throw new Error("Modell gibt NaN zurück. Überprüfen Sie die Modellfunktion und die Parameter.");
+				}
+
+				var derivative = (fPlusH - fMinusH) / (2 * h);
+				row.push(derivative);
+			  }
+			  matrix.subset(math.index([i], math.range(0, initialParams.length)), row);
+			}
+			return matrix;
+		  }
+
+		  // Berechnung des Fehlerbetrags
+		  function computeError(residuals) {
+			var squaredResiduals = math.map(residuals, function (residual) {
+			  return math.square(residual);
+			});
+			var squaredSum = math.sum(squaredResiduals);
+			return math.sqrt(squaredSum / xValues.length);
+		  }
+
+		  // Levenberg-Marquardt-Algorithmus
+		  var params = initialParams;
+		  var iterations = 0;
+		  var error = Number.MAX_VALUE;
+		  var damping = options.damping;
+
+		  // Funktion zum Erstellen einer Einheitsmatrix
+		  function createIdentityMatrix(size) {
+			var matrix = math.zeros(size, size);
+			for (var i = 0; i < size; i++) {
+			  matrix.subset(math.index(i, i), 1);
+			}
+			return matrix;
+		  }
+
+		  while (iterations < options.maxIterations && error > options.errorTolerance) {
+			var residuals = computeResiduals(params);
+			var currentError = computeError(residuals);
+
+			// Berechnung der Jacobi-Matrix
+			var jacobianMatrix = jacobian(params);
+
+			// Berechnung der normalen Gleichungen und des Gradienten
+			var normalMatrix = math.multiply(math.transpose(jacobianMatrix), jacobianMatrix);
+			var gradient = math.multiply(math.transpose(jacobianMatrix), residuals);
+
+			// Berechnung des Schrittvektors
+			var identityMatrix = createIdentityMatrix(initialParams.length);
+			var step = math.lusolve(math.add(normalMatrix, math.multiply(damping, identityMatrix)), math.multiply(-1, gradient));
+
+			// Aktualisierung der Parameter
+			params = math.add(params, math.squeeze(step));
+
+			// Aktualisierung des Fehlerwerts
+			var newResiduals = computeResiduals(params);
+			var newError = computeError(newResiduals);
+
+			if (newError < currentError) {
+			  damping /= 10;
+			  error = newError;
+			} else {
+			  damping *= 10;
+			  params = math.subtract(params, math.squeeze(step));
+			}
+
+			iterations++;
+		  }
+
+		  // Definition der Funktion für die angepasste Kurve
+		  var fittedFunction = function (x) {
+				return exponentialModel(x, params);
+		  };
+
+		  return {
+			parameters: params,
+			error: error,
+			iterations: iterations,
+			fittedFunction: fittedFunction
+		  };
+		}
+  
+		// Definition der exponentiellen Kurvenanpassungsfunktion
+		function exponentialModel(x, params) {
+			 
+		  var a = initialParamsA[0];
+		  var b = initialParamsA[1];
+ 
+		  // Berechnung der Funktion
+		  var result = a * math.exp(b * x);
+	 
+		  if (isNaN(result)) {
+			throw new Error("Modell gibt NaN zurück. Überprüfen Sie die Modellfunktion und die Parameter.");
+		  }
+
+		  return result;
+		}
+
+		function estimateInitialParameters(xValues, yValues) {
+		  var sumX = 0;
+		  var sumY = 0;
+		  var sumXY = 0;
+		  var sumXX = 0;
+
+		  var n = xValues.length;
+
+		  // Berechnung der Summen
+		  for (var i = 0; i < n; i++) {
+			sumX += xValues[i];
+			sumY += Math.log(yValues[i]);
+			sumXY += xValues[i] * Math.log(yValues[i]);
+			sumXX += xValues[i] * xValues[i];
+		  }
+
+		  // Berechnung der Schätzwerte für a und b
+		  var b = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
+		  var a = (sumY - b * sumX) / n;
+
+		  // Rückgabe der geschätzten Anfangsparameter
+		  return [Math.exp(a), b];
+		}
+  
+		// Optionen
+		var options = {
+		  damping: 0.00000001,
+		  maxIterations: 10000,
+		  errorTolerance: 0.00000000000000000000000000000000000000000000000000000000001
+		};
+   
+	   // Ausführung der Kurvenanpassung
+	   var result = levenbergMarquardt(xValues, yValues, initialParamsA, exponentialModel, options);
+
+	   // Anwendung der angepassten Funktion auf einen Wert
+	   var fittedResult = result.fittedFunction(1);
+	   console.log('fitted result: ' + fittedResult); // Ausgabe: Angepasster Wert für x = 6
+      
+	 
+  </script>
+
+</body>
+</html>
